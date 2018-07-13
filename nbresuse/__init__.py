@@ -1,10 +1,50 @@
 import os
 import json
 import psutil
-from traitlets import Float, Int, default
+from traitlets import Float, Int, Integer, default, TraitError
 from traitlets.config import Configurable
 from notebook.utils import url_path_join
 from notebook.base.handlers import IPythonHandler
+
+class ByteSpecification(Integer):
+    """
+    Allow easily specifying bytes in units of 1024 with suffixes
+    Suffixes allowed are:
+      - K -> Kilobyte
+      - M -> Megabyte
+      - G -> Gigabyte
+      - T -> Terabyte
+    """
+
+    UNIT_SUFFIXES = {
+        'K': 1024,
+        'M': 1024 * 1024,
+        'G': 1024 * 1024 * 1024,
+        'T': 1024 * 1024 * 1024 * 1024,
+    }
+
+    # Default to allowing None as a value
+    allow_none = True
+
+    def validate(self, obj, value):
+        """
+        Validate that the passed in value is a valid memory specification
+        It could either be a pure int, when it is taken as a byte value.
+        If it has one of the suffixes, it is converted into the appropriate
+        pure byte value.
+        """
+        if isinstance(value, (int, float)):
+            return int(value)
+
+        try:
+            num = float(value[:-1])
+        except ValueError:
+            raise TraitError('{val} is not a valid memory specification. Must be an int or a string with suffix K, M, G, T'.format(val=value))
+        suffix = value[-1]
+        if suffix not in self.UNIT_SUFFIXES:
+            raise TraitError('{val} is not a valid memory specification. Must be an int or a string with suffix K, M, G, T'.format(val=value))
+        else:
+            return int(float(num) * self.UNIT_SUFFIXES[suffix])
 
 
 class MetricsHandler(IPythonHandler):
@@ -70,8 +110,8 @@ class ResourceUseDisplay(Configurable):
         config=True
     )
 
-    mem_limit = Int(
-        0,
+    mem_limit = ByteSpecification(
+        os.environ.get("MEM_LIMIT", 0),
         config=True,
         help="""
         Memory limit to display to the user, in bytes.
@@ -82,10 +122,6 @@ class ResourceUseDisplay(Configurable):
         set to 0, no memory limit is displayed.
         """
     )
-
-    @default('mem_limit')
-    def _mem_limit_default(self):
-        return int(os.environ.get('MEM_LIMIT', 0))
 
 def load_jupyter_server_extension(nbapp):
     """
